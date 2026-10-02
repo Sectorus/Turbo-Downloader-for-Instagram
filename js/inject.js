@@ -186,57 +186,75 @@ var _global =
                   }
                   return void e.ports[0].postMessage(i);
                 }
+                function resolveNode(node, source, fallbackUsername) {
+                  if (!node) return null;
+                  const user = node.user?.__ref ? source.get(node.user.__ref) : null;
+                  const ownerUsername = user?.username || fallbackUsername;
+                  let candidates = null;
+                  if (node.image_versions2?.__ref) {
+                    const imgV = source.get(node.image_versions2.__ref);
+                    if (imgV?.candidates?.__refs) {
+                      candidates = imgV.candidates.__refs
+                        .map((r) => source.get(r))
+                        .filter(Boolean);
+                    }
+                  }
+                  let carousel = null;
+                  if (node.carousel_media?.__refs) {
+                    carousel = node.carousel_media.__refs
+                      .map((r) => {
+                        const cNode = source.get(r);
+                        if (!cNode) return null;
+                        let cCands = null;
+                        if (cNode.image_versions2?.__ref) {
+                          const cImg = source.get(cNode.image_versions2.__ref);
+                          if (cImg?.candidates?.__refs) {
+                            cCands = cImg.candidates.__refs
+                              .map((cr) => source.get(cr))
+                              .filter(Boolean);
+                          }
+                        }
+                        return {
+                          id: cNode.id || cNode.pk,
+                          pk: cNode.pk || cNode.id,
+                          taken_at: cNode.taken_at,
+                          user: { username: ownerUsername },
+                          image_versions2: cCands ? { candidates: cCands } : null,
+                          video_versions: cNode.video_versions || null,
+                        };
+                      })
+                      .filter(Boolean);
+                  }
+                  return {
+                    id: node.id || node.pk,
+                    pk: node.pk || node.id,
+                    code: node.code,
+                    taken_at: node.taken_at,
+                    user: { username: ownerUsername },
+                    image_versions2: candidates ? { candidates } : null,
+                    carousel_media: carousel,
+                    video_versions: node.video_versions || null,
+                    media_type: node.media_type || (carousel ? 8 : (node.product_type === "clips" || node.is_video ? 2 : 1)),
+                    product_type: node.product_type || "feed",
+                  };
+                }
+
+                function getUserIdForUsername(username, source) {
+                  if (!username) return null;
+                  const ids = source.getRecordIDs ? source.getRecordIDs() : [];
+                  for (const id of ids) {
+                    if (id.startsWith("XDTUserDict:")) {
+                      const rec = source.get(id);
+                      if (rec && rec.username && rec.username.toLowerCase() === username.toLowerCase()) {
+                        return rec.id || rec.pk;
+                      }
+                    }
+                  }
+                  return null;
+                }
+
                 if ("loadUserTimeline" === t.procedure) {
                   try {
-                    function resolveNode(node, source) {
-                      if (!node) return null;
-                      const user = node.user?.__ref ? source.get(node.user.__ref) : null;
-                      let candidates = null;
-                      if (node.image_versions2?.__ref) {
-                        const imgV = source.get(node.image_versions2.__ref);
-                        if (imgV?.candidates?.__refs) {
-                          candidates = imgV.candidates.__refs
-                            .map((r) => source.get(r))
-                            .filter(Boolean);
-                        }
-                      }
-                      let carousel = null;
-                      if (node.carousel_media?.__refs) {
-                        carousel = node.carousel_media.__refs
-                          .map((r) => {
-                            const cNode = source.get(r);
-                            if (!cNode) return null;
-                            let cCands = null;
-                            if (cNode.image_versions2?.__ref) {
-                              const cImg = source.get(cNode.image_versions2.__ref);
-                              if (cImg?.candidates?.__refs) {
-                                cCands = cImg.candidates.__refs
-                                  .map((cr) => source.get(cr))
-                                  .filter(Boolean);
-                              }
-                            }
-                            return {
-                              id: cNode.id,
-                              pk: cNode.pk,
-                              taken_at: cNode.taken_at,
-                              user: { username: user?.username || t.username },
-                              image_versions2: cCands ? { candidates: cCands } : null,
-                              video_versions: cNode.video_versions || null,
-                            };
-                          })
-                          .filter(Boolean);
-                      }
-                      return {
-                        id: node.id,
-                        pk: node.pk,
-                        taken_at: node.taken_at,
-                        user: { username: user?.username || t.username },
-                        image_versions2: candidates ? { candidates } : null,
-                        carousel_media: carousel,
-                        video_versions: node.video_versions || null,
-                      };
-                    }
-
                     const CometRelay = window.require("CometRelay");
                     const env = window.require("PolarisRelayEnvironment");
                     const query = window.require("PolarisProfilePostsQuery");
@@ -304,7 +322,7 @@ var _global =
                       .map((r) => {
                         const edge = source.get(r);
                         return edge?.node?.__ref
-                          ? resolveNode(source.get(edge.node.__ref), source)
+                          ? resolveNode(source.get(edge.node.__ref), source, username)
                           : null;
                       })
                       .filter(Boolean);
@@ -322,6 +340,199 @@ var _global =
                     });
                   } catch (err) {
                     console.error("loadUserTimeline error:", err);
+                    return void e.ports[0].postMessage(null);
+                  }
+                }
+
+                if ("loadUserReels" === t.procedure) {
+                  try {
+                    const CometRelay = window.require("CometRelay");
+                    const env = window.require("PolarisRelayEnvironment");
+                    const source = env.getStore().getSource();
+                    const username = t.username;
+                    let userId = t.userId || getUserIdForUsername(username, source);
+
+                    if (!userId) {
+                      try {
+                        const uRes = await fetch(
+                          `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+                          {
+                            headers: {
+                              "x-ig-app-id": "936619743392459",
+                              "x-requested-with": "XMLHttpRequest",
+                            },
+                            credentials: "include",
+                          },
+                        );
+                        const uData = await uRes.json();
+                        if (uData?.data?.user?.id) userId = uData.data.user.id;
+                      } catch (err) {}
+                    }
+
+                    if (!userId) {
+                      return void e.ports[0].postMessage({ items: [], more_available: false });
+                    }
+
+                    let query = null;
+                    try {
+                      query = window.require("PolarisProfileReelsTabContentQuery.graphql");
+                    } catch (err) {}
+                    if (!query) {
+                      const rr = window.require("relay-runtime");
+                      query = rr?.PreloadableQueryRegistry?.get("28217628591240469");
+                    }
+
+                    const after = t.after || null;
+                    const variables = {
+                      user_id: userId,
+                      first: 12,
+                      after: after,
+                      data: {
+                        include_feed_video: true,
+                        page_size: 12,
+                        target_user_id: userId,
+                      },
+                    };
+
+                    await CometRelay.fetchQuery(env, query, variables).toPromise();
+
+                    const ids = source.getRecordIDs ? source.getRecordIDs() : [];
+                    let connKey = null;
+                    if (after) {
+                      connKey = ids.find(
+                        (id) =>
+                          id.includes(userId) &&
+                          id.includes("clips_connection") &&
+                          id.includes(after),
+                      );
+                    }
+                    if (!connKey) {
+                      connKey = ids.find(
+                        (id) =>
+                          id.includes(userId) &&
+                          id.includes('clips_connection(data:{"include_feed_video":true,"page_size":12,"target_user_id":"' + userId + '"'),
+                      );
+                    }
+                    if (!connKey) {
+                      connKey = ids.find(
+                        (id) => id.includes(userId) && id.includes("clips_connection"),
+                      );
+                    }
+
+                    const conn = connKey ? source.get(connKey) : null;
+                    const pi = conn?.page_info?.__ref ? source.get(conn.page_info.__ref) : null;
+                    const edges = conn?.edges?.__refs || [];
+
+                    const items = edges
+                      .map((ref) => {
+                        const edge = source.get(ref);
+                        if (!edge || !edge.node) return null;
+                        const node = source.get(edge.node.__ref);
+                        if (!node) return null;
+                        const mediaRef = (node.media && node.media.__ref) || edge.node.__ref;
+                        const media = source.get(mediaRef);
+                        if (!media) return null;
+                        return resolveNode(media, source, username);
+                      })
+                      .filter(Boolean);
+
+                    return void e.ports[0].postMessage({
+                      items,
+                      next_max_id: pi?.has_next_page ? pi.end_cursor : void 0,
+                      more_available: Boolean(pi?.has_next_page),
+                    });
+                  } catch (err) {
+                    console.error("loadUserReels error:", err);
+                    return void e.ports[0].postMessage(null);
+                  }
+                }
+
+                if ("loadUserTagged" === t.procedure) {
+                  try {
+                    const CometRelay = window.require("CometRelay");
+                    const env = window.require("PolarisRelayEnvironment");
+                    const source = env.getStore().getSource();
+                    const username = t.username;
+                    let userId = t.userId || getUserIdForUsername(username, source);
+
+                    if (!userId) {
+                      try {
+                        const uRes = await fetch(
+                          `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+                          {
+                            headers: {
+                              "x-ig-app-id": "936619743392459",
+                              "x-requested-with": "XMLHttpRequest",
+                            },
+                            credentials: "include",
+                          },
+                        );
+                        const uData = await uRes.json();
+                        if (uData?.data?.user?.id) userId = uData.data.user.id;
+                      } catch (err) {}
+                    }
+
+                    if (!userId) {
+                      return void e.ports[0].postMessage({ items: [], more_available: false });
+                    }
+
+                    const JSResource = window.require("JSResourceForInteraction");
+                    if (JSResource) {
+                      try {
+                        await JSResource("PolarisProfileTaggedTabRoot.react").load();
+                      } catch (err) {}
+                    }
+                    const rr = window.require("relay-runtime");
+                    const query = rr?.PreloadableQueryRegistry?.get("28463910693308962");
+
+                    const after = t.after || null;
+                    const variables = {
+                      user_id: userId,
+                      count: 12,
+                      after: after,
+                    };
+
+                    await CometRelay.fetchQuery(env, query, variables).toPromise();
+
+                    const ids = source.getRecordIDs ? source.getRecordIDs() : [];
+                    let connKey = null;
+                    if (after) {
+                      connKey = ids.find(
+                        (id) =>
+                          id.includes(userId) &&
+                          id.includes("usertags__user_id__feed_connection") &&
+                          id.includes(after),
+                      );
+                    }
+                    if (!connKey) {
+                      connKey = ids.find(
+                        (id) =>
+                          id.includes(userId) &&
+                          id.includes("usertags__user_id__feed_connection"),
+                      );
+                    }
+
+                    const conn = connKey ? source.get(connKey) : null;
+                    const pi = conn?.page_info?.__ref ? source.get(conn.page_info.__ref) : null;
+                    const edges = conn?.edges?.__refs || [];
+
+                    const items = edges
+                      .map((ref) => {
+                        const edge = source.get(ref);
+                        if (!edge || !edge.node) return null;
+                        const media = source.get(edge.node.__ref);
+                        if (!media) return null;
+                        return resolveNode(media, source, username);
+                      })
+                      .filter(Boolean);
+
+                    return void e.ports[0].postMessage({
+                      items,
+                      next_max_id: pi?.has_next_page ? pi.end_cursor : void 0,
+                      more_available: Boolean(pi?.has_next_page),
+                    });
+                  } catch (err) {
+                    console.error("loadUserTagged error:", err);
                     return void e.ports[0].postMessage(null);
                   }
                 }

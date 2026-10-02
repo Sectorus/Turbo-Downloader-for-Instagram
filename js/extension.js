@@ -14282,6 +14282,9 @@ var _global =
                 "Could not find account. Are you signed in?",
                 "warn",
               ));
+            const isReelsTab = /\/[^/]+\/reels(?:\/)?(\?.*)*$/.test(location.href);
+            const isTaggedTab = /\/[^/]+\/tagged(?:\/)?(\?.*)*$/.test(location.href);
+
             const t = Xe.getHeaders();
             const n = yield Ze.getAccount(e, t.appId, t.wwwClaim);
             if (!n)
@@ -14292,7 +14295,7 @@ var _global =
                   "warn",
                 ))
               );
-            const r = n.totalPosts,
+            const r = isReelsTab || isTaggedTab ? 0 : n.totalPosts,
               i = [];
             let a,
               l = 0;
@@ -14366,7 +14369,6 @@ var _global =
                   ));
             }
             const u = new Ne();
-            let c;
             u.updateProgress({
               completed: l,
               total: r,
@@ -14375,21 +14377,94 @@ var _global =
               account: n,
               type: "fetch",
             });
-            do {
-              let o = 0;
-              (([c, o] = yield Ze.appendToItems(e, t.appId, t.wwwClaim, c, i)),
-                (l += o),
-                i.length,
-                u.updateProgress({
-                  completed: l,
-                  total: r,
-                  isFirst: !1,
-                  isLast: !1,
-                  account: n,
-                  type: "fetch",
-                }),
-                yield new Promise((e) => setTimeout(e, 1500)));
-            } while (void 0 !== c);
+
+            if (isReelsTab) {
+              let c;
+              do {
+                let count = 0;
+                (([c, count] = yield Ze.appendReelsToItems(e, t.appId, t.wwwClaim, c, i, n.id)),
+                  (l += count),
+                  u.updateProgress({
+                    completed: l,
+                    total: r,
+                    isFirst: !1,
+                    isLast: !1,
+                    account: n,
+                    type: "fetch",
+                  }),
+                  yield new Promise((e) => setTimeout(e, 1000)));
+              } while (void 0 !== c);
+            } else if (isTaggedTab) {
+              let c;
+              do {
+                let count = 0;
+                (([c, count] = yield Ze.appendTaggedToItems(e, t.appId, t.wwwClaim, c, i, n.id)),
+                  (l += count),
+                  u.updateProgress({
+                    completed: l,
+                    total: r,
+                    isFirst: !1,
+                    isLast: !1,
+                    account: n,
+                    type: "fetch",
+                  }),
+                  yield new Promise((e) => setTimeout(e, 1000)));
+              } while (void 0 !== c);
+            } else {
+              // Main profile: posts + reels + tagged
+              let c;
+              do {
+                let count = 0;
+                (([c, count] = yield Ze.appendToItems(e, t.appId, t.wwwClaim, c, i, n.id)),
+                  (l += count),
+                  u.updateProgress({
+                    completed: l,
+                    total: r,
+                    isFirst: !1,
+                    isLast: !1,
+                    account: n,
+                    type: "fetch",
+                  }),
+                  yield new Promise((e) => setTimeout(e, 1500)));
+              } while (void 0 !== c);
+
+              try {
+                let rc;
+                do {
+                  let count = 0;
+                  (([rc, count] = yield Ze.appendReelsToItems(e, t.appId, t.wwwClaim, rc, i, n.id)),
+                    (l += count),
+                    u.updateProgress({
+                      completed: l,
+                      total: r,
+                      isFirst: !1,
+                      isLast: !1,
+                      account: n,
+                      type: "fetch",
+                    }),
+                    yield new Promise((e) => setTimeout(e, 1000)));
+                } while (void 0 !== rc);
+              } catch (err) {}
+
+              try {
+                let tc;
+                do {
+                  let count = 0;
+                  (([tc, count] = yield Ze.appendTaggedToItems(e, t.appId, t.wwwClaim, tc, i, n.id)),
+                    (l += count),
+                    u.updateProgress({
+                      completed: l,
+                      total: r,
+                      isFirst: !1,
+                      isLast: !1,
+                      account: n,
+                      type: "fetch",
+                    }),
+                    yield new Promise((e) => setTimeout(e, 1000)));
+                } while (void 0 !== tc);
+              } catch (err) {}
+            }
+
             u.updateProgress({
               completed: l,
               total: r,
@@ -14402,7 +14477,7 @@ var _global =
               imageURL: i.map((e) => e.url),
               accountName: e || "unknown",
               type: m.bulk,
-              source: h.Account,
+              source: isReelsTab ? h.Reels : (isTaggedTab ? h.Tagged : h.Account),
             };
             (yield o.runtime.sendMessage(d), yield Oe(i, n, void 0, a));
           });
@@ -14478,7 +14553,7 @@ var _global =
             }
           });
         }
-        static appendToItems(e, n, r, o, i) {
+        static appendToItems(e, n, r, o, i, userId) {
           return t(this, void 0, void 0, function* () {
             // 1. Try internal Relay timeline query via inject.js bridge
             try {
@@ -14490,7 +14565,7 @@ var _global =
                   resolve(evt.data);
                 };
                 window.postMessage(
-                  { procedure: "loadUserTimeline", username: e, after: o },
+                  { procedure: "loadUserTimeline", username: e, userId, after: o },
                   "https://www.instagram.com",
                   [mc.port2],
                 );
@@ -14505,7 +14580,11 @@ var _global =
                   try {
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
-                      media.forEach((m) => i.push(m));
+                      media.forEach((m) => {
+                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                          i.push(m);
+                        }
+                      });
                     }
                   } catch (err) {}
                 }
@@ -14543,7 +14622,11 @@ var _global =
                   try {
                     const media = Je.getAllDownloadableMediaItems(e);
                     if (media && Array.isArray(media)) {
-                      media.forEach((e) => i.push(e));
+                      media.forEach((e) => {
+                        if (!i.some((existing) => existing.pk === e.pk || existing.id === e.id)) {
+                          i.push(e);
+                        }
+                      });
                     }
                   } catch (err) {}
                 }
@@ -14556,6 +14639,100 @@ var _global =
               Te(err);
               return [void 0, 0];
             }
+          });
+        }
+        static appendReelsToItems(e, n, r, o, i, userId) {
+          return t(this, void 0, void 0, function* () {
+            try {
+              const res = yield new Promise((resolve) => {
+                const mc = new MessageChannel();
+                const timeout = setTimeout(() => resolve(null), 15000);
+                mc.port1.onmessage = (evt) => {
+                  clearTimeout(timeout);
+                  resolve(evt.data);
+                };
+                window.postMessage(
+                  { procedure: "loadUserReels", username: e, userId, after: o },
+                  "https://www.instagram.com",
+                  [mc.port2],
+                );
+              });
+              if (
+                res &&
+                res.items &&
+                Array.isArray(res.items) &&
+                res.items.length > 0
+              ) {
+                for (let item of res.items) {
+                  try {
+                    if (item.pk && (!item.video_versions || item.video_versions.length === 0)) {
+                      try {
+                        const info = yield Je.fetchMediaItem(item.pk, n, r);
+                        if (info) item = info;
+                      } catch (err) {}
+                    }
+                    const media = Je.getAllDownloadableMediaItems(item);
+                    if (media && Array.isArray(media)) {
+                      media.forEach((m) => {
+                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                          i.push(m);
+                        }
+                      });
+                    }
+                  } catch (err) {}
+                }
+                return res.more_available
+                  ? [res.next_max_id, res.items.length]
+                  : [void 0, res.items.length];
+              }
+            } catch (err) {
+              Te(err);
+            }
+            return [void 0, 0];
+          });
+        }
+        static appendTaggedToItems(e, n, r, o, i, userId) {
+          return t(this, void 0, void 0, function* () {
+            try {
+              const res = yield new Promise((resolve) => {
+                const mc = new MessageChannel();
+                const timeout = setTimeout(() => resolve(null), 15000);
+                mc.port1.onmessage = (evt) => {
+                  clearTimeout(timeout);
+                  resolve(evt.data);
+                };
+                window.postMessage(
+                  { procedure: "loadUserTagged", username: e, userId, after: o },
+                  "https://www.instagram.com",
+                  [mc.port2],
+                );
+              });
+              if (
+                res &&
+                res.items &&
+                Array.isArray(res.items) &&
+                res.items.length > 0
+              ) {
+                for (let item of res.items) {
+                  try {
+                    const media = Je.getAllDownloadableMediaItems(item);
+                    if (media && Array.isArray(media)) {
+                      media.forEach((m) => {
+                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                          i.push(m);
+                        }
+                      });
+                    }
+                  } catch (err) {}
+                }
+                return res.more_available
+                  ? [res.next_max_id, res.items.length]
+                  : [void 0, res.items.length];
+              }
+            } catch (err) {
+              Te(err);
+            }
+            return [void 0, 0];
           });
         }
         createDownloadButton() {
