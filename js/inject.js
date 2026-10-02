@@ -198,7 +198,34 @@ var _global =
                         .map((r) => source.get(r))
                         .filter(Boolean);
                     }
+                  } else if (node.image_versions2?.candidates) {
+                    if (Array.isArray(node.image_versions2.candidates)) {
+                      candidates = node.image_versions2.candidates;
+                    } else if (Array.isArray(node.image_versions2.candidates.__refs)) {
+                      candidates = node.image_versions2.candidates.__refs
+                        .map((r) => source.get(r))
+                        .filter(Boolean);
+                    }
                   }
+
+                  let videoVersions = null;
+                  if (node.video_versions) {
+                    if (Array.isArray(node.video_versions)) {
+                      videoVersions = node.video_versions;
+                    } else if (Array.isArray(node.video_versions.__refs)) {
+                      videoVersions = node.video_versions.__refs
+                        .map((r) => source.get(r))
+                        .filter(Boolean);
+                    } else if (node.video_versions.__ref) {
+                      const vv = source.get(node.video_versions.__ref);
+                      if (Array.isArray(vv)) {
+                        videoVersions = vv;
+                      } else if (Array.isArray(vv?.__refs)) {
+                        videoVersions = vv.__refs.map((r) => source.get(r)).filter(Boolean);
+                      }
+                    }
+                  }
+
                   let carousel = null;
                   if (node.carousel_media?.__refs) {
                     carousel = node.carousel_media.__refs
@@ -213,14 +240,41 @@ var _global =
                               .map((cr) => source.get(cr))
                               .filter(Boolean);
                           }
+                        } else if (cNode.image_versions2?.candidates) {
+                          if (Array.isArray(cNode.image_versions2.candidates)) {
+                            cCands = cNode.image_versions2.candidates;
+                          } else if (Array.isArray(cNode.image_versions2.candidates.__refs)) {
+                            cCands = cNode.image_versions2.candidates.__refs
+                              .map((cr) => source.get(cr))
+                              .filter(Boolean);
+                          }
                         }
+
+                        let cVideoVersions = null;
+                        if (cNode.video_versions) {
+                          if (Array.isArray(cNode.video_versions)) {
+                            cVideoVersions = cNode.video_versions;
+                          } else if (Array.isArray(cNode.video_versions.__refs)) {
+                            cVideoVersions = cNode.video_versions.__refs
+                              .map((cr) => source.get(cr))
+                              .filter(Boolean);
+                          } else if (cNode.video_versions.__ref) {
+                            const vv = source.get(cNode.video_versions.__ref);
+                            if (Array.isArray(vv)) {
+                              cVideoVersions = vv;
+                            } else if (Array.isArray(vv?.__refs)) {
+                              cVideoVersions = vv.__refs.map((cr) => source.get(cr)).filter(Boolean);
+                            }
+                          }
+                        }
+
                         return {
                           id: cNode.id || cNode.pk,
                           pk: cNode.pk || cNode.id,
                           taken_at: cNode.taken_at,
                           user: { username: ownerUsername },
                           image_versions2: cCands ? { candidates: cCands } : null,
-                          video_versions: cNode.video_versions || null,
+                          video_versions: cVideoVersions,
                         };
                       })
                       .filter(Boolean);
@@ -233,8 +287,8 @@ var _global =
                     user: { username: ownerUsername },
                     image_versions2: candidates ? { candidates } : null,
                     carousel_media: carousel,
-                    video_versions: node.video_versions || null,
-                    media_type: node.media_type || (carousel ? 8 : (node.product_type === "clips" || node.is_video ? 2 : 1)),
+                    video_versions: videoVersions,
+                    media_type: node.media_type || (carousel ? 8 : ((videoVersions && videoVersions.length > 0) || node.product_type === "clips" || node.is_video ? 2 : 1)),
                     product_type: node.product_type || "feed",
                   };
                 }

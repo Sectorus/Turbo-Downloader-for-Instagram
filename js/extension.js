@@ -13734,22 +13734,27 @@ var _global =
                 }
               }
             } catch (e) {
+              console.error("Oe download error for item:", i, e);
               if (
                 (De((t) => {
                   (t.setExtra("bulkItem", i), Te(e));
                 }),
                 a)
               ) {
-                const t = new Blob([
-                    "Request did not succeed. If you are using Firefox go into you privacy settings ans select the\n                standard setting (https://support.mozilla.org/en-US/kb/content-blocking). If that is not the problem you tried to download to many images\n                and instagram has blocked you temporarily.\n\n",
-                    "If you are using chrome there is currently a bug in chrome which seems to block my requests. So stay strong and hope that this error gets fixed soon.",
-                    e.toString(),
-                  ]),
-                  n = yield a.getFileHandle(Me(i) + ".error.txt", {
-                    create: !0,
-                  }),
-                  r = yield n.createWritable();
-                (yield r.write(t), yield r.close());
+                try {
+                  const t = new Blob([
+                      "Request did not succeed. If you are using Firefox go into you privacy settings ans select the\n                standard setting (https://support.mozilla.org/en-US/kb/content-blocking). If that is not the problem you tried to download to many images\n                and instagram has blocked you temporarily.\n\n",
+                      "If you are using chrome there is currently a bug in chrome which seems to block my requests. So stay strong and hope that this error gets fixed soon.",
+                      e.toString(),
+                    ]),
+                    n = yield a.getFileHandle(Me(i) + ".error.txt", {
+                      create: !0,
+                    }),
+                    r = yield n.createWritable();
+                  (yield r.write(t), yield r.close());
+                } catch (writeErr) {
+                  console.error("Failed to write error file:", writeErr);
+                }
               }
             }
             t.updateProgress({
@@ -13770,11 +13775,19 @@ var _global =
         });
       }
       function Me(e) {
-        return `${e.username}_${e.taken_at}_${e.id}.${((t = e.url), t.match(Ue)[1])}`.replace(
-          /[<>:"/\\|?*]/g,
-          "",
-        );
-        var t;
+        let ext = "jpg";
+        if (e && e.url) {
+          const m = e.url.match(/\.([0-9a-z]+)(?:[\?#]|$)/i);
+          if (m && m[1]) {
+            ext = m[1].toLowerCase();
+          } else if (e.url.includes(".mp4")) {
+            ext = "mp4";
+          }
+        }
+        const user = ((e && e.username) || "instagram").replace(/[<>:"/\\|?*]/g, "");
+        const taken = ((e && e.taken_at) || "").toString().replace(/[<>:"/\\|?*]/g, "");
+        const id = ((e && (e.id || e.pk)) || Date.now()).toString().replace(/[<>:"/\\|?*]/g, "");
+        return `${user}_${taken}_${id}.${ext}`;
       }
       const Ue = /\.([0-9a-z]+)(?:[\?#]|$)/i;
       var Be;
@@ -14142,15 +14155,26 @@ var _global =
           });
         }
         static getBestMediaUrl(e, t = 0) {
-          if (e.carousel_media)
-            return this.getBestMediaUrl(e.carousel_media[t], 0);
-          let n, r;
-          n = e.video_versions
-            ? e.video_versions
-            : e.image_versions2.candidates;
-          for (const e of n)
-            (!r || e.height * e.width > r.height * r.width) && (r = e);
-          return r.url;
+          if (!e) return "";
+          if (e.carousel_media && Array.isArray(e.carousel_media) && e.carousel_media.length > 0)
+            return this.getBestMediaUrl(e.carousel_media[t] || e.carousel_media[0], 0);
+          let n = [];
+          if (Array.isArray(e.video_versions) && e.video_versions.length > 0) {
+            n = e.video_versions;
+          } else if (e.image_versions2 && Array.isArray(e.image_versions2.candidates)) {
+            n = e.image_versions2.candidates;
+          } else if (Array.isArray(e.candidates)) {
+            n = e.candidates;
+          }
+          let r = null;
+          for (const item of n) {
+            if (item && item.url) {
+              if (!r || ((item.height || 0) * (item.width || 0) > (r.height || 0) * (r.width || 0))) {
+                r = item;
+              }
+            }
+          }
+          return r ? r.url : (e.url || "");
         }
         static getBestMediaDataItem(e) {
           var t;
@@ -14163,7 +14187,7 @@ var _global =
                   : t.candidates) || [];
               break;
             case 2:
-              n = e.video_versions;
+              n = Array.isArray(e.video_versions) ? e.video_versions : [];
           }
           if (0 === n.length) return null;
           let r = 0;
@@ -14175,26 +14199,37 @@ var _global =
           );
         }
         static getAllDownloadableMediaItems(e) {
-          if (!e.carousel_media)
-            return [
-              {
-                id: e.id,
-                pk: e.pk,
-                taken_at: e.taken_at,
-                username: e.user.username,
-                url: this.getBestMediaUrl(e),
-              },
-            ];
-          const t = e.user.username;
+          if (!e) return [];
+          const username = (e.user && e.user.username) || e.username || "instagram";
+          if (!e.carousel_media || !Array.isArray(e.carousel_media) || e.carousel_media.length === 0) {
+            const url = this.getBestMediaUrl(e);
+            return url
+              ? [
+                  {
+                    id: e.id || e.pk,
+                    pk: e.pk || e.id,
+                    taken_at: e.taken_at,
+                    username: username,
+                    url: url,
+                  },
+                ]
+              : [];
+          }
           let n = [];
-          for (let r of e.carousel_media)
-            n.push({
-              id: r.id,
-              pk: r.pk,
-              taken_at: r.taken_at,
-              username: t,
-              url: this.getBestMediaUrl(r),
-            });
+          for (let r of e.carousel_media) {
+            if (r) {
+              const url = this.getBestMediaUrl(r);
+              if (url) {
+                n.push({
+                  id: r.id || r.pk || e.id,
+                  pk: r.pk || r.id || e.pk,
+                  taken_at: r.taken_at || e.taken_at,
+                  username: username,
+                  url: url,
+                });
+              }
+            }
+          }
           return n;
         }
         static getIgId(e, t = !0) {
@@ -14282,8 +14317,8 @@ var _global =
                 "Could not find account. Are you signed in?",
                 "warn",
               ));
-            const isReelsTab = /\/[^/]+\/reels(?:\/)?(\?.*)*$/.test(location.href);
-            const isTaggedTab = /\/[^/]+\/tagged(?:\/)?(\?.*)*$/.test(location.href);
+            const isReelsTab = /\/reels\/?$/.test(location.pathname);
+            const isTaggedTab = /\/tagged\/?$/.test(location.pathname);
 
             const t = Xe.getHeaders();
             const n = yield Ze.getAccount(e, t.appId, t.wwwClaim);
@@ -14295,7 +14330,7 @@ var _global =
                   "warn",
                 ))
               );
-            const r = isReelsTab || isTaggedTab ? 0 : n.totalPosts,
+            const r = isReelsTab || isTaggedTab ? 0 : (n.totalPosts || 0),
               i = [];
             let a,
               l = 0;
@@ -14371,7 +14406,7 @@ var _global =
             const u = new Ne();
             u.updateProgress({
               completed: l,
-              total: r,
+              total: Math.max(r, l),
               isFirst: !0,
               isLast: !1,
               account: n,
@@ -14386,7 +14421,7 @@ var _global =
                   (l += count),
                   u.updateProgress({
                     completed: l,
-                    total: r,
+                    total: Math.max(r, l),
                     isFirst: !1,
                     isLast: !1,
                     account: n,
@@ -14402,7 +14437,7 @@ var _global =
                   (l += count),
                   u.updateProgress({
                     completed: l,
-                    total: r,
+                    total: Math.max(r, l),
                     isFirst: !1,
                     isLast: !1,
                     account: n,
@@ -14419,7 +14454,7 @@ var _global =
                   (l += count),
                   u.updateProgress({
                     completed: l,
-                    total: r,
+                    total: Math.max(r, l),
                     isFirst: !1,
                     isLast: !1,
                     account: n,
@@ -14436,7 +14471,7 @@ var _global =
                     (l += count),
                     u.updateProgress({
                       completed: l,
-                      total: r,
+                      total: Math.max(r, l),
                       isFirst: !1,
                       isLast: !1,
                       account: n,
@@ -14454,7 +14489,7 @@ var _global =
                     (l += count),
                     u.updateProgress({
                       completed: l,
-                      total: r,
+                      total: Math.max(r, l),
                       isFirst: !1,
                       isLast: !1,
                       account: n,
@@ -14467,7 +14502,7 @@ var _global =
 
             u.updateProgress({
               completed: l,
-              total: r,
+              total: Math.max(r, l),
               isFirst: !1,
               isLast: !0,
               account: n,
@@ -14581,7 +14616,7 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
                           i.push(m);
                         }
                       });
@@ -14623,7 +14658,7 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(e);
                     if (media && Array.isArray(media)) {
                       media.forEach((e) => {
-                        if (!i.some((existing) => existing.pk === e.pk || existing.id === e.id)) {
+                        if (e && e.url && !i.some((existing) => existing.pk === e.pk || existing.id === e.id || existing.url === e.url)) {
                           i.push(e);
                         }
                       });
@@ -14665,7 +14700,7 @@ var _global =
               ) {
                 for (let item of res.items) {
                   try {
-                    if (item.pk && (!item.video_versions || item.video_versions.length === 0)) {
+                    if (item.pk && (!item.video_versions || !Array.isArray(item.video_versions) || item.video_versions.length === 0)) {
                       try {
                         const info = yield Je.fetchMediaItem(item.pk, n, r);
                         if (info) item = info;
@@ -14674,18 +14709,21 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
                           i.push(m);
                         }
                       });
                     }
-                  } catch (err) {}
+                  } catch (err) {
+                    console.error("appendReelsToItems item error:", err);
+                  }
                 }
                 return res.more_available
                   ? [res.next_max_id, res.items.length]
                   : [void 0, res.items.length];
               }
             } catch (err) {
+              console.error("appendReelsToItems error:", err);
               Te(err);
             }
             return [void 0, 0];
@@ -14718,7 +14756,7 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (!i.some((existing) => existing.pk === m.pk || existing.id === m.id)) {
+                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
                           i.push(m);
                         }
                       });
@@ -14730,6 +14768,7 @@ var _global =
                   : [void 0, res.items.length];
               }
             } catch (err) {
+              console.error("appendTaggedToItems error:", err);
               Te(err);
             }
             return [void 0, 0];
