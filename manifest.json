@@ -35,7 +35,6 @@
   "name": "Turbo Downloader for Instagram",
   "options_page": "options.html",
   "permissions": ["storage"],
-  "update_url": "https://clients2.google.com/service/update2/crx",
   "version": "4.12.16",
   "web_accessible_resources": [
     {
