@@ -61,6 +61,90 @@ var _global =
             }));
         },
         816: () => {
+          (() => {
+            function saveClaim(c) {
+              if (c && typeof c === "string" && c !== "0" && c !== "undefined") {
+                try {
+                  sessionStorage.setItem("__ig_www_claim", c);
+                  localStorage.setItem("__ig_www_claim", c);
+                } catch (e) {}
+              }
+            }
+            function saveAppId(id) {
+              if (id && typeof id === "string" && id !== "undefined") {
+                try {
+                  sessionStorage.setItem("__ig_app_id", id);
+                  localStorage.setItem("__ig_app_id", id);
+                } catch (e) {}
+              }
+            }
+
+            if (typeof window.fetch === "function") {
+              const origFetch = window.fetch;
+              window.fetch = function (resource, init) {
+                try {
+                  if (init && init.headers) {
+                    const h = init.headers;
+                    let claim, appId;
+                    if (typeof Headers !== "undefined" && h instanceof Headers) {
+                      claim = h.get("x-ig-www-claim");
+                      appId = h.get("x-ig-app-id");
+                    } else if (Array.isArray(h)) {
+                      for (const [k, v] of h) {
+                        if (typeof k === "string" && k.toLowerCase() === "x-ig-www-claim") claim = v;
+                        if (typeof k === "string" && k.toLowerCase() === "x-ig-app-id") appId = v;
+                      }
+                    } else if (typeof h === "object") {
+                      claim = h["x-ig-www-claim"] || h["X-IG-WWW-CLAIM"];
+                      appId = h["x-ig-app-id"] || h["X-IG-APP-ID"];
+                    }
+                    if (claim) saveClaim(claim);
+                    if (appId) saveAppId(appId);
+                  }
+                } catch (err) {}
+
+                return origFetch.apply(this, arguments).then((response) => {
+                  try {
+                    if (response && response.headers && typeof response.headers.get === "function") {
+                      const setClaim = response.headers.get("x-ig-set-www-claim") || response.headers.get("x-ig-www-claim");
+                      if (setClaim) saveClaim(setClaim);
+                    }
+                  } catch (err) {}
+                  return response;
+                });
+              };
+            }
+
+            if (typeof window.XMLHttpRequest === "function") {
+              const origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+              const origSend = XMLHttpRequest.prototype.send;
+
+              XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
+                try {
+                  if (typeof header === "string") {
+                    const lower = header.toLowerCase();
+                    if (lower === "x-ig-www-claim") saveClaim(value);
+                    if (lower === "x-ig-app-id") saveAppId(value);
+                  }
+                } catch (err) {}
+                return origSetRequestHeader.apply(this, arguments);
+              };
+
+              XMLHttpRequest.prototype.send = function () {
+                try {
+                  this.addEventListener("readystatechange", () => {
+                    try {
+                      if (this.readyState === 2 || this.readyState === 4) {
+                        const setClaim = this.getResponseHeader("x-ig-set-www-claim") || this.getResponseHeader("x-ig-www-claim");
+                        if (setClaim) saveClaim(setClaim);
+                      }
+                    } catch (err) {}
+                  });
+                } catch (err) {}
+                return origSend.apply(this, arguments);
+              };
+            }
+          })();
           "#__ig_downloader_options" !== location.hash &&
             (window.addEventListener("message", async (e) => {
               if (
@@ -102,18 +186,161 @@ var _global =
                   }
                   return void e.ports[0].postMessage(i);
                 }
+                if ("loadUserTimeline" === t.procedure) {
+                  try {
+                    function resolveNode(node, source) {
+                      if (!node) return null;
+                      const user = node.user?.__ref ? source.get(node.user.__ref) : null;
+                      let candidates = null;
+                      if (node.image_versions2?.__ref) {
+                        const imgV = source.get(node.image_versions2.__ref);
+                        if (imgV?.candidates?.__refs) {
+                          candidates = imgV.candidates.__refs
+                            .map((r) => source.get(r))
+                            .filter(Boolean);
+                        }
+                      }
+                      let carousel = null;
+                      if (node.carousel_media?.__refs) {
+                        carousel = node.carousel_media.__refs
+                          .map((r) => {
+                            const cNode = source.get(r);
+                            if (!cNode) return null;
+                            let cCands = null;
+                            if (cNode.image_versions2?.__ref) {
+                              const cImg = source.get(cNode.image_versions2.__ref);
+                              if (cImg?.candidates?.__refs) {
+                                cCands = cImg.candidates.__refs
+                                  .map((cr) => source.get(cr))
+                                  .filter(Boolean);
+                              }
+                            }
+                            return {
+                              id: cNode.id,
+                              pk: cNode.pk,
+                              taken_at: cNode.taken_at,
+                              user: { username: user?.username || t.username },
+                              image_versions2: cCands ? { candidates: cCands } : null,
+                              video_versions: cNode.video_versions || null,
+                            };
+                          })
+                          .filter(Boolean);
+                      }
+                      return {
+                        id: node.id,
+                        pk: node.pk,
+                        taken_at: node.taken_at,
+                        user: { username: user?.username || t.username },
+                        image_versions2: candidates ? { candidates } : null,
+                        carousel_media: carousel,
+                        video_versions: node.video_versions || null,
+                      };
+                    }
+
+                    const CometRelay = window.require("CometRelay");
+                    const env = window.require("PolarisRelayEnvironment");
+                    const query = window.require("PolarisProfilePostsQuery");
+                    const username = t.username;
+                    const after = t.after || null;
+                    const source = env.getStore().getSource();
+
+                    let recordKey = null;
+                    if (after) {
+                      recordKey = source
+                        .getRecordIDs()
+                        .find(
+                          (id) =>
+                            id.includes("user_timeline_graphql_connection") &&
+                            id.includes(after),
+                        );
+                    } else {
+                      recordKey = source
+                        .getRecordIDs()
+                        .find(
+                          (id) =>
+                            id.includes("user_timeline_graphql_connection") &&
+                            id.includes(username),
+                        );
+                    }
+
+                    if (!recordKey) {
+                      await CometRelay.fetchQuery(env, query, {
+                        data: {
+                          count: 12,
+                          include_reel_media_seen_timestamp: true,
+                          include_relationship_info: true,
+                          latest_besties_reel_media: true,
+                          latest_reel_media: true,
+                        },
+                        username,
+                        first: 12,
+                        last: null,
+                        before: null,
+                        after,
+                      }).toPromise();
+
+                      if (after) {
+                        recordKey = source
+                          .getRecordIDs()
+                          .find(
+                            (id) =>
+                              id.includes("user_timeline_graphql_connection") &&
+                              id.includes(after),
+                          );
+                      } else {
+                        recordKey = source
+                          .getRecordIDs()
+                          .find(
+                            (id) =>
+                              id.includes("user_timeline_graphql_connection") &&
+                              id.includes(username),
+                          );
+                      }
+                    }
+
+                    const record = recordKey ? source.get(recordKey) : null;
+                    const edgeRefs = record?.edges?.__refs || [];
+                    const items = edgeRefs
+                      .map((r) => {
+                        const edge = source.get(r);
+                        return edge?.node?.__ref
+                          ? resolveNode(source.get(edge.node.__ref), source)
+                          : null;
+                      })
+                      .filter(Boolean);
+
+                    const pageInfo = record?.page_info?.__ref
+                      ? source.get(record.page_info.__ref)
+                      : null;
+
+                    return void e.ports[0].postMessage({
+                      items,
+                      next_max_id: pageInfo?.has_next_page
+                        ? pageInfo.end_cursor
+                        : void 0,
+                      more_available: Boolean(pageInfo?.has_next_page),
+                    });
+                  } catch (err) {
+                    console.error("loadUserTimeline error:", err);
+                    return void e.ports[0].postMessage(null);
+                  }
+                }
                 (console.log(t), e.ports[0].postMessage(void 0));
               }
             }),
             (() => {
+              let eRetryCount = 0;
               function e() {
                 try {
-                  sessionStorage.setItem(
-                    "__ig_www_claim",
-                    window.require("PolarisWWWClaim").getWWWClaim(),
-                  );
+                  if (typeof window.require === "function") {
+                    const c = window.require("PolarisWWWClaim");
+                    if (c && typeof c.getWWWClaim === "function") {
+                      const claim = c.getWWWClaim();
+                      if (claim) sessionStorage.setItem("__ig_www_claim", claim);
+                    }
+                  }
                 } catch (t) {
-                  setTimeout(e, 100);
+                  if (++eRetryCount < 10) setTimeout(e, 500);
                 }
               }
               function t(e) {
@@ -268,25 +495,28 @@ var _global =
                   }
                 }
               }
-              (!(function e() {
+              (!(function () {
                 try {
-                  sessionStorage.setItem(
-                    "__ig_app_id",
-                    window.require("PolarisConfig").getIGAppID(),
-                  );
-                } catch (t) {
-                  setTimeout(e, 100);
-                }
+                  if (typeof window.require === "function") {
+                    const c = window.require("PolarisConfig");
+                    if (c && typeof c.getIGAppID === "function") {
+                      const id = c.getIGAppID();
+                      if (id) {
+                        sessionStorage.setItem("__ig_app_id", id);
+                        localStorage.setItem("__ig_app_id", id);
+                      }
+                    }
+                  } else if (!sessionStorage.getItem("__ig_app_id")) {
+                    sessionStorage.setItem("__ig_app_id", "936619743392459");
+                  }
+                } catch (t) {}
               })(),
                 e(),
-                (function e() {
+                (function () {
                   const t = "function" == typeof window.require ? "1" : "";
-                  (t !== sessionStorage.getItem("__ig_has_require") &&
-                    sessionStorage.setItem(
-                      "__ig_has_require",
-                      "function" == typeof window.require ? "1" : "",
-                    ),
-                    t || setTimeout(e, 1e3));
+                  if (t !== sessionStorage.getItem("__ig_has_require")) {
+                    sessionStorage.setItem("__ig_has_require", t);
+                  }
                 })(),
                 window.addEventListener("storage", (t) => {
                   t.key &&

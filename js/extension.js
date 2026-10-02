@@ -13977,19 +13977,47 @@ var _global =
       Ve = Ge = e([_], Ve);
       let Xe = (Ke = class {
         static getWwwClaim() {
-          const e =
+          let e =
             sessionStorage.getItem("__ig_www_claim") ||
-            sessionStorage.getItem("www-claim-v2");
+            sessionStorage.getItem("www-claim-v2") ||
+            localStorage.getItem("__ig_www_claim") ||
+            localStorage.getItem("www-claim-v2");
+          if (!e) {
+            try {
+              for (let t = 0; t < sessionStorage.length; t++) {
+                const n = sessionStorage.key(t);
+                const r = sessionStorage.getItem(n);
+                if (r && typeof r === "string" && r.startsWith("hmac.")) {
+                  e = r;
+                  break;
+                }
+              }
+            } catch (t) {}
+          }
+          if (!e) {
+            try {
+              for (let t = 0; t < localStorage.length; t++) {
+                const n = localStorage.key(t);
+                const r = localStorage.getItem(n);
+                if (r && typeof r === "string" && r.startsWith("hmac.")) {
+                  e = r;
+                  break;
+                }
+              }
+            } catch (t) {}
+          }
           return (
             De((t) => {
               (t.setExtra("hasWwwClaim", null != e),
-                t.setExtra("hasNonZeroWwwClaim", e.length > 1));
+                t.setExtra("hasNonZeroWwwClaim", Boolean(e && e.length > 1)));
             }),
-            e
+            e || "0"
           );
         }
         static getAppId() {
-          const e = sessionStorage.getItem("__ig_app_id"),
+          const e =
+            sessionStorage.getItem("__ig_app_id") ||
+            localStorage.getItem("__ig_app_id"),
             t = e || "936619743392459";
           return (
             De((n) => {
@@ -14000,8 +14028,10 @@ var _global =
           );
         }
         static getHeaders() {
-          if (this.getWwwClaim() && this.getAppId())
-            return { appId: this.getAppId(), wwwClaim: this.getWwwClaim() };
+          return {
+            appId: this.getAppId() || "936619743392459",
+            wwwClaim: this.getWwwClaim() || "0",
+          };
         }
         static getIdFromShortcode(e) {
           e.length > 28 && (e = e.substr(0, e.length - 28));
@@ -14032,7 +14062,6 @@ var _global =
             const a = Ke.getHeaders();
             if (
               (a &&
-                "0" != a.wwwClaim &&
                 ((t = yield Je.fetchMediaItem(e, a.appId, a.wwwClaim)),
                 t &&
                   ((o = Je.getAllDownloadableMediaItems(t)),
@@ -14077,7 +14106,21 @@ var _global =
           return t(this, void 0, void 0, function* () {
             let t;
             try {
-              const o = { headers: { "x-ig-app-id": n, "x-ig-www-claim": r } },
+              const headers = {
+                "x-ig-app-id": n || "936619743392459",
+                "x-ig-www-claim": r || "0",
+                "x-requested-with": "XMLHttpRequest",
+                "x-asbd-id": "129477",
+                accept: "*/*",
+              };
+              try {
+                const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+                if (match && match[1]) {
+                  headers["x-csrftoken"] = decodeURIComponent(match[1]);
+                }
+              } catch (err) {}
+
+              const o = { headers, credentials: "include" },
                 i = yield fetch(
                   `https://www.instagram.com/api/v1/media/${e}/info/`,
                   o,
@@ -14089,7 +14132,7 @@ var _global =
                     "warn",
                   )),
                 (t = yield i.json()),
-                t.items[0]
+                t && t.items ? t.items[0] : void 0
               );
             } catch (e) {
               De((n) => {
@@ -14200,17 +14243,46 @@ var _global =
       let et = (Ze = class extends p {
         static downloadContent() {
           return t(this, void 0, void 0, function* () {
-            let e = document.querySelector(y.accountName).innerHTML;
-            if (e.includes("<") || e.includes('"')) {
-              const t = location.href.match(/\.\w+?\/(.+?)\//);
-              t && (e = t[1]);
+            let e = "";
+            const pathParts = location.pathname.split("/").filter(Boolean);
+            const reserved = new Set([
+              "explore",
+              "reels",
+              "stories",
+              "direct",
+              "accounts",
+              "p",
+              "reel",
+              "tv",
+              "home",
+              "about",
+              "legal",
+              "privacy",
+            ]);
+            if (pathParts.length > 0 && !reserved.has(pathParts[0].toLowerCase())) {
+              e = pathParts[0];
             }
-            const t = Xe.getHeaders();
-            if (!t)
+            if (!e) {
+              const el = document.querySelector(y.accountName);
+              if (el) {
+                const text = (el.innerText || el.textContent || "").trim();
+                if (text && !text.includes("<") && !text.includes('"') && !text.includes("\n")) {
+                  e = text.replace(/^@/, "").trim();
+                }
+              }
+            }
+            if (!e) {
+              const t = location.href.match(/\.com\/([^/?#]+)/);
+              if (t && t[1] && !reserved.has(t[1].toLowerCase())) {
+                e = t[1];
+              }
+            }
+            if (!e)
               return void (yield s.createAndAdd(
                 "Could not find account. Are you signed in?",
                 "warn",
               ));
+            const t = Xe.getHeaders();
             const n = yield Ze.getAccount(e, t.appId, t.wwwClaim);
             if (!n)
               return (
@@ -14338,16 +14410,68 @@ var _global =
         static getAccount(e, n, r) {
           return t(this, void 0, void 0, function* () {
             try {
-              const t = { headers: { "x-ig-app-id": n, "x-ig-www-claim": r } },
-                o = yield fetch(
-                  `https://www.instagram.com/api/v1/users/web_profile_info/?username=${e}`,
-                  t,
-                ),
-                i = yield o.json();
+              const headers = {
+                "x-ig-app-id": n || "936619743392459",
+                "x-ig-www-claim": r || "0",
+                "x-requested-with": "XMLHttpRequest",
+                "x-asbd-id": "129477",
+                accept: "*/*",
+              };
+              try {
+                const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+                if (match && match[1]) {
+                  headers["x-csrftoken"] = decodeURIComponent(match[1]);
+                }
+              } catch (err) {}
+
+              const o = yield fetch(
+                `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(e)}`,
+                { headers, credentials: "include" },
+              );
+              if (o.ok) {
+                const i = yield o.json();
+                if (i && i.data && i.data.user) {
+                  return {
+                    username: i.data.user.username || e,
+                    profilePicUrl: i.data.user.profile_pic_url || "",
+                    totalPosts:
+                      (i.data.user.edge_owner_to_timeline_media &&
+                        i.data.user.edge_owner_to_timeline_media.count) ||
+                      0,
+                    id: i.data.user.id || "",
+                  };
+                }
+              }
+            } catch (e) {
+              Te(e);
+            }
+
+            // Fallback: extract account info from the profile page DOM
+            try {
+              let avatar = "";
+              const img = document.querySelector(
+                "header img, img[alt*='profile picture' i]",
+              );
+              if (img && img.src) avatar = img.src;
+
+              let count = 0;
+              const stats = document.querySelectorAll(
+                "header ul li, header section ul li",
+              );
+              for (const stat of stats) {
+                const text = stat.textContent || "";
+                if (/posts|Beitr/i.test(text)) {
+                  const match = text.replace(/,/g, "").match(/\d+/);
+                  if (match) count = parseInt(match[0], 10);
+                  break;
+                }
+              }
+
               return {
-                username: i.data.user.username,
-                profilePicUrl: i.data.user.profile_pic_url,
-                totalPosts: i.data.user.edge_owner_to_timeline_media.count || 0,
+                username: e,
+                profilePicUrl: avatar,
+                totalPosts: count,
+                id: "",
               };
             } catch (e) {
               Te(e);
@@ -14356,17 +14480,82 @@ var _global =
         }
         static appendToItems(e, n, r, o, i) {
           return t(this, void 0, void 0, function* () {
-            const t = { headers: { "x-ig-app-id": n, "x-ig-www-claim": r } },
-              a = yield fetch(
-                `https://www.instagram.com/api/v1/feed/user/${e}/username/?count=12${o ? "&max_id=" + o : ""}`,
-                t,
-              ),
-              s = yield a.json();
-            for (let e of s.items)
-              Je.getAllDownloadableMediaItems(e).forEach((e) => i.push(e));
-            return s.more_available
-              ? [s.next_max_id, s.items.length]
-              : [void 0, 0];
+            // 1. Try internal Relay timeline query via inject.js bridge
+            try {
+              const res = yield new Promise((resolve) => {
+                const mc = new MessageChannel();
+                const timeout = setTimeout(() => resolve(null), 10000);
+                mc.port1.onmessage = (evt) => {
+                  clearTimeout(timeout);
+                  resolve(evt.data);
+                };
+                window.postMessage(
+                  { procedure: "loadUserTimeline", username: e, after: o },
+                  "https://www.instagram.com",
+                  [mc.port2],
+                );
+              });
+              if (
+                res &&
+                res.items &&
+                Array.isArray(res.items) &&
+                res.items.length > 0
+              ) {
+                for (let item of res.items) {
+                  try {
+                    const media = Je.getAllDownloadableMediaItems(item);
+                    if (media && Array.isArray(media)) {
+                      media.forEach((m) => i.push(m));
+                    }
+                  } catch (err) {}
+                }
+                return res.more_available
+                  ? [res.next_max_id, res.items.length]
+                  : [void 0, res.items.length];
+              }
+            } catch (err) {
+              Te(err);
+            }
+
+            // 2. Fallback to REST endpoint
+            try {
+              const headers = {
+                "x-ig-app-id": n || "936619743392459",
+                "x-ig-www-claim": r || "0",
+                "x-requested-with": "XMLHttpRequest",
+                "x-asbd-id": "129477",
+                accept: "*/*",
+              };
+              try {
+                const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+                if (match && match[1]) {
+                  headers["x-csrftoken"] = decodeURIComponent(match[1]);
+                }
+              } catch (err) {}
+
+              const a = yield fetch(
+                `https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(e)}/username/?count=12${o ? "&max_id=" + encodeURIComponent(o) : ""}`,
+                { headers, credentials: "include" },
+              );
+              const s = yield a.json();
+              if (s && s.items && Array.isArray(s.items)) {
+                for (let e of s.items) {
+                  try {
+                    const media = Je.getAllDownloadableMediaItems(e);
+                    if (media && Array.isArray(media)) {
+                      media.forEach((e) => i.push(e));
+                    }
+                  } catch (err) {}
+                }
+                return s.more_available
+                  ? [s.next_max_id, s.items.length]
+                  : [void 0, 0];
+              }
+              return [void 0, 0];
+            } catch (err) {
+              Te(err);
+              return [void 0, 0];
+            }
           });
         }
         createDownloadButton() {
@@ -14407,66 +14596,94 @@ var _global =
             this.subscribeToLocationChangeListener());
         }
         static isHome(e) {
-          return /^https:\/\/www\.instagram\.com\/(\?.*)*$/.test(e);
+          return /^https:\/\/www\.instagram\.com(?:\/)?(\?.*)*$/.test(e);
         }
         static isPost(e) {
           return (
-            /https:\/\/www\.instagram\.com\/p\/[^/]*\/(\?.*)*$/.test(e) ||
-            /https:\/\/www\.instagram\.com\/(.*)\/p\/[^/]*\/(\?.*)*$/.test(e) ||
-            /https:\/\/www\.instagram\.com\/reel\/[^/]*\/(\?.*)*$/.test(e)
+            /https:\/\/www\.instagram\.com\/p\/[^/]+(?:\/)?(\?.*)*$/.test(e) ||
+            /https:\/\/www\.instagram\.com\/(.*)\/p\/[^/]+(?:\/)?(\?.*)*$/.test(e) ||
+            /https:\/\/www\.instagram\.com\/reel\/[^/]+(?:\/)?(\?.*)*$/.test(e)
           );
         }
         static isExplore(e) {
           return (
-            /https:\/\/www\.instagram\.com\/explore\/tags\/[^\/]*\/(\?.*)*$/.test(
+            /https:\/\/www\.instagram\.com\/explore\/tags\/[^\/]+(?:\/)?(\?.*)*$/.test(
               e,
-            ) || /https:\/\/www\.instagram\.com\/explore\/$/.test(e)
+            ) || /https:\/\/www\.instagram\.com\/explore(?:\/|$)/.test(e)
           );
         }
         static isStory(e) {
           return (
-            /https:\/\/www\.instagram\.com\/stories\/[^/]*\/[^/]*\/(\?.*)*$/.test(
+            /https:\/\/www\.instagram\.com\/stories\/[^/]+\/[^/]+(?:\/)?(\?.*)*$/.test(
               e,
             ) ||
-            /https:\/\/www\.instagram\.com\/stories\/[^/]*\/(\?.*)*$/.test(e) ||
-            /https:\/\/www\.instagram\.com\/stories\/highlights\/[^/]*\/(\?.*)*$/.test(
+            /https:\/\/www\.instagram\.com\/stories\/[^/]+(?:\/)?(\?.*)*$/.test(e) ||
+            /https:\/\/www\.instagram\.com\/stories\/highlights\/[^/]+(?:\/)?(\?.*)*$/.test(
               e,
             )
           );
         }
         static isChannel(e) {
-          return /https:\/\/www\.instagram\.com\/[^/]*\/channel\/(\?.*)*$/.test(
+          return /https:\/\/www\.instagram\.com\/[^/]+\/channel(?:\/)?(\?.*)*$/.test(
             e,
           );
         }
         static isReel(e) {
-          return /https:\/\/www\.instagram\.com\/[^/]*\/reels\/(\?.*)*$/.test(
+          return /https:\/\/www\.instagram\.com\/[^/]+\/reels(?:\/)?(\?.*)*$/.test(
             e,
           );
         }
         static isReelFeed(e) {
-          return /https:\/\/www\.instagram\.com\/reels\/[^/]*\/(\?.*)*$/.test(
+          return /https:\/\/www\.instagram\.com\/reels(?:\/[^/]+)?(?:\/)?(\?.*)*$/.test(
             e,
           );
         }
         static isTV(e) {
-          return /https:\/\/www\.instagram\.com\/tv\/[^/]*\/(\?.*)*$/.test(e);
+          return /https:\/\/www\.instagram\.com\/tv\/[^/]+(?:\/)?(\?.*)*$/.test(e);
         }
         static isSaved(e) {
-          return /https:\/\/www\.instagram\.com\/[^/]*\/saved\/(\?.*)*$/.test(
+          return /https:\/\/www\.instagram\.com\/[^/]+\/saved(?:\/)?(\?.*)*$/.test(
             e,
           );
         }
         static isTagged(e) {
-          return /https:\/\/www\.instagram\.com\/[^/]*\/tagged\/(\?.*)*$/.test(
+          return /https:\/\/www\.instagram\.com\/[^/]+\/tagged(?:\/)?(\?.*)*$/.test(
             e,
           );
         }
         static isAccount(e) {
-          return (
-            /https:\/\/www\.instagram\.com\/[^/]*\/(\?.*)*$/.test(e) &&
-            !/.*explore\/$/.test(e)
-          );
+          try {
+            const u = new URL(e, location.origin);
+            if (!u.hostname.includes("instagram.com")) return false;
+            const parts = u.pathname.split("/").filter(Boolean);
+            if (parts.length !== 1) return false;
+            const reserved = new Set([
+              "explore",
+              "reels",
+              "stories",
+              "direct",
+              "accounts",
+              "p",
+              "reel",
+              "tv",
+              "developer",
+              "about",
+              "legal",
+              "privacy",
+              "api",
+              "graphql",
+              "static",
+              "home",
+            ]);
+            return !reserved.has(parts[0].toLowerCase());
+          } catch (t) {
+            return (
+              /https:\/\/www\.instagram\.com\/[^/]+(?:\/)?(\?.*)*$/.test(e) &&
+              !/.*(?:explore|reels|stories|direct|accounts|p|reel|tv)(?:\/.*|$)/.test(
+                e,
+              )
+            );
+          }
         }
         emitLocationEvent() {
           (tt.isHome(this.url) && this.emit("home"),
