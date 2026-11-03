@@ -5,7 +5,7 @@
   "content_scripts": [
     {
       "css": ["css/extension.css"],
-      "js": ["js/extension.js"],
+      "js": ["js/media-format.js", "js/extension.js"],
       "matches": ["*://*.instagram.com/*"]
     },
     {

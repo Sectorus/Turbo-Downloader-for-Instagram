@@ -12417,7 +12417,7 @@ var _global =
               "._aatk._aatl, ._aatk._aatn, ._aato._ab1k._ab1l, ._aagu._ab64 ._aagv, ._aagw"),
             (e.postReactElement = "._aatk._aiao > div"),
             (e.imagePreview =
-              'a._a6hd[__igdl_id][href*="/p/"], a._a6hd[__igdl_id][href*="/reel/"]'),
+              'a._a6hd[__igdl_id][href*="/p/"], a._a6hd[__igdl_id][href*="/reel/"], a._a6hd[__igdl_id][href*="/reels/"]'),
             (e.storyHeartPath =
               'path[d="M16.792 3.904A4.989 4.989 0 0 1 21.5 9.122c0 3.072-2.652 4.959-5.197 7.222-2.512 2.243-3.865 3.469-4.303 3.752-.477-.309-2.143-1.823-4.303-3.752C5.141 14.072 2.5 12.167 2.5 9.122a4.989 4.989 0 0 1 4.708-5.218 4.21 4.21 0 0 1 3.675 1.941c.84 1.175.98 1.763 1.12 1.763s.278-.588 1.11-1.766a4.17 4.17 0 0 1 3.679-1.938m0-2a6.04 6.04 0 0 0-4.797 2.127 6.052 6.052 0 0 0-4.787-2.127A6.985 6.985 0 0 0 .5 9.122c0 3.61 2.55 5.827 5.015 7.97.283.246.569.494.853.747l1.027.918a44.998 44.998 0 0 0 3.518 3.018 2 2 0 0 0 2.174 0 45.263 45.263 0 0 0 3.626-3.115l.922-.824c.293-.26.59-.519.885-.774 2.334-2.025 4.98-4.32 4.98-7.94a6.985 6.985 0 0 0-6.708-7.218Z"]'),
             (e.storyUserIcon = "a[href]:has(> img)"),
@@ -12437,7 +12437,7 @@ var _global =
             (e.accountImageWrapper =
               ".RR-M-, .M-jxE, ._aarf._aarg, ._aarf ._aa8h, ._aarf"),
             (e.reelsControlsStrip =
-              ".x9f619.xjbqb8w.x78zum5.x168nmei.x13lgxp2.x5pf9jr.xo71vjh.x12nagc.x1uhb9sk.x1plvlek.xryxfnj.x1c4vz4f.x2lah0s.xdt5ytf.xqjyukv.x6s0dn4.x1oa3qoh.x13a6bvl.x16n37ib.x1247r65"));
+              ".x9f619.xjbqb8w.x78zum5.x12nagc.xdt5ytf.x13a6bvl.x1247r65"));
         })(y || (y = {})));
       var S = n(235);
       const E = ["debug", "info", "warn", "error", "log", "assert", "trace"],
@@ -13642,6 +13642,7 @@ var _global =
                   });
                 },
               }),
+              { headers: r.headers },
             );
             return yield s.blob();
           }),
@@ -13693,6 +13694,8 @@ var _global =
                 (o = n));
             }),
           );
+          const convertedBlob = yield globalThis.__igdlMediaFormat.convertWebpToJpeg(i);
+          const downloadedExtension = yield globalThis.__igdlMediaFormat.getDownloadedExtension(convertedBlob, e);
           (yield r.updateProgress({
             isFirst: !1,
             isLast: !0,
@@ -13700,30 +13703,162 @@ var _global =
             total: o,
             type: "downloadBytes",
           }),
-            Re(i, n));
+            Re(convertedBlob, globalThis.__igdlMediaFormat.replaceExtension(n, downloadedExtension)));
         });
-      function Oe(e, n, r, o) {
+      function sanitizePostPathPart(value, fallback) {
+        const safe = String(value || "")
+          .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+          .replace(/[. ]+$/g, "")
+          .trim();
+        return safe || fallback;
+      }
+      function getPostShortcode(item) {
+        const shortcode = item && (item.shortcode || item.code || item.postShortcode);
+        if (shortcode) return sanitizePostPathPart(shortcode, "unknown");
+        const mediaId = item && (item.postId || item.id || item.pk);
+        try {
+          return sanitizePostPathPart(Xe.getShortcodeFromId(String(mediaId)), "unknown");
+        } catch (error) {
+          return sanitizePostPathPart(mediaId, "unknown");
+        }
+      }
+      function getPostDescription(post) {
+        const caption = post && (post.caption || post.caption_text);
+        if (typeof caption === "string") return caption;
+        if (caption && typeof caption.text === "string") return caption.text;
+        const edges = post && post.edge_media_to_caption && post.edge_media_to_caption.edges;
+        const text = edges && edges[0] && edges[0].node && edges[0].node.text;
+        return typeof text === "string" ? text : "";
+      }
+      function buildPostDownloadFilename(item, occurrence, mediaCount, profileUsername) {
+        const url = item && item.url;
+        const ext = globalThis.__igdlMediaFormat.getUrlExtension(url) || "jpg";
+
+        const rawTimestamp = Number(item && item.taken_at);
+        const timestamp = rawTimestamp > 1e12 ? rawTimestamp : rawTimestamp * 1000;
+        let date = "unknown-date";
+        if (Number.isFinite(timestamp) && timestamp > 0) {
+          const parsedDate = new Date(timestamp);
+          if (Number.isFinite(parsedDate.getTime())) date = parsedDate.toISOString().slice(0, 10);
+        }
+
+        const username = sanitizePostPathPart(profileUsername || (item && item.username), "instagram");
+        const shortcode = getPostShortcode(item);
+        const mediaSuffix = mediaCount > 1 ? ` - ${String(occurrence).padStart(2, "0")}` : "";
+        return `${date} - ${username} - ${shortcode}${mediaSuffix}.${ext}`;
+      }
+      async function writePostSidecars(profileDirectory, item, mediaFilename, profileUsername) {
+        try {
+          const metadataDirectory = await profileDirectory.getDirectoryHandle("Posts and Metadata", { create: true });
+          const metadataRoot = await metadataDirectory.getDirectoryHandle(".metadata", { create: true });
+          const jsonDirectory = await metadataRoot.getDirectoryHandle("json", { create: true });
+          const jsonHandle = await jsonDirectory.getFileHandle(`${mediaFilename}.json`, { create: true });
+          const jsonWritable = await jsonHandle.createWritable();
+          await jsonWritable.write(JSON.stringify({
+            id: item.id || item.pk || null,
+            shortcode: getPostShortcode(item),
+            username: profileUsername || item.username || "instagram",
+            taken_at: item.taken_at || null,
+            mediaOrdinal: item.mediaOrdinal || 1,
+            mediaCount: item.mediaCount || 1,
+            filename: mediaFilename,
+            description: item.description || null,
+          }, null, 2));
+          await jsonWritable.close();
+
+          if (item.description) {
+            const descriptionsDirectory = await metadataRoot.getDirectoryHandle("descriptions", { create: true });
+            const descriptionFilename = buildPostDownloadFilename(item, 1, 1, profileUsername).replace(/\.[^/.]+$/, ".txt");
+            const descriptionHandle = await descriptionsDirectory.getFileHandle(descriptionFilename, { create: true });
+            const descriptionWritable = await descriptionHandle.createWritable();
+            await descriptionWritable.write(item.description);
+            await descriptionWritable.close();
+          }
+        } catch (error) {
+          console.warn("Could not save Instagram post metadata:", error);
+        }
+      }
+      async function getPostDownloadDirectoryHandle() {
+        try {
+          const store = new We();
+          let directory = await store.getDownloadDirectoryHandle();
+          if (typeof FileSystemDirectoryHandle !== "undefined" && directory instanceof FileSystemDirectoryHandle) {
+            if ((await directory.requestPermission({ mode: "readwrite" })) === "granted") return directory;
+          }
+          if (typeof window.showDirectoryPicker !== "function") {
+            throw new Error("File System Access API is not available.");
+          }
+          await s.createAndAdd(
+            "Please select the folder for your Instagram downloads.",
+            "default",
+            !0,
+            1e4,
+          );
+          directory = await window.showDirectoryPicker({
+            id: "__igdl",
+            mode: "readwrite",
+            startIn: "downloads",
+          });
+          await store.setDownloadDirectoryHandle(directory);
+          return directory;
+        } catch (error) {
+          if (error && error.name === "AbortError") return null;
+          console.error("Could not access the Instagram download folder:", error);
+          await s.createAndAdd("Could not get access to the download folder.", "warn", !0, null);
+          return null;
+        }
+      }
+      function Oe(e, n, r, o, outputFolder = "Posts and Metadata") {
         return t(this, void 0, void 0, function* () {
           const t = new Ne();
           if (0 == e.length) return;
-          let i, a;
-          o &&
-            ((i = n.username),
-            (a = yield o.getDirectoryHandle(i, { create: !0 })));
+          let i, a, profileDirectory;
+          const outputDirectories = new Map();
+          const postDownload = Boolean(o);
+          if (postDownload) {
+            i = `Instagram - ${sanitizePostPathPart(n && n.username, "instagram")}`;
+            profileDirectory = yield o.getDirectoryHandle(i, { create: !0 });
+            a = yield profileDirectory.getDirectoryHandle(outputFolder, { create: !0 });
+            outputDirectories.set(outputFolder, a);
+          }
           let l = 0,
             u = 0;
-          for (const [o, i] of e.entries()) {
-            const s = i.url;
+          for (const [index, item] of e.entries()) {
+            const s = item.url;
+            const itemOutputFolder = item.outputFolder === "Reels" ? "Reels" : outputFolder;
+            let itemDirectory = outputDirectories.get(itemOutputFolder);
+            if (postDownload && !itemDirectory) {
+              itemDirectory = yield profileDirectory.getDirectoryHandle(itemOutputFolder, { create: !0 });
+              outputDirectories.set(itemOutputFolder, itemDirectory);
+            }
+            const proposedFileName = postDownload
+              ? buildPostDownloadFilename(
+                  item,
+                  Number(item.mediaOrdinal) || 1,
+                  Number(item.mediaCount) || 1,
+                  n && n.username,
+                )
+              : Me(item);
             try {
+              let downloadedBlob = null;
+              let fileName = proposedFileName;
+              if (globalThis.__igdlMediaFormat.requiresContentInspection(s)) {
+                downloadedBlob = yield Pe(s);
+                downloadedBlob = yield globalThis.__igdlMediaFormat.convertWebpToJpeg(downloadedBlob);
+                const downloadedExtension = yield globalThis.__igdlMediaFormat.getDownloadedExtension(downloadedBlob, s);
+                fileName = globalThis.__igdlMediaFormat.replaceExtension(fileName, downloadedExtension);
+              }
               if (r) {
-                const e = yield Pe(s);
-                Re(e, Me(i));
-              } else if (a) {
-                const e = yield a.getFileHandle(Me(i), { create: !0 });
+                downloadedBlob || (downloadedBlob = yield Pe(s));
+                downloadedBlob = yield globalThis.__igdlMediaFormat.convertWebpToJpeg(downloadedBlob);
+                const downloadedExtension = yield globalThis.__igdlMediaFormat.getDownloadedExtension(downloadedBlob, s);
+                Re(downloadedBlob, globalThis.__igdlMediaFormat.replaceExtension(Me(item), downloadedExtension));
+              } else if (itemDirectory) {
+                const e = yield itemDirectory.getFileHandle(fileName, { create: !0 });
                 if ((yield e.getFile()).size > 0) u += 1;
                 else {
                   const t = new Date().getTime(),
-                    n = yield Pe(s),
+                    n = downloadedBlob || (yield Pe(s)),
                     r = yield e.createWritable();
                   (yield r.write(n), yield r.close(), (l += 1));
                   const o = new Date().getTime() - t;
@@ -13732,36 +13867,21 @@ var _global =
                       setTimeout(e, Math.min(2 * o, 499)),
                     ));
                 }
-              }
-            } catch (e) {
-              console.error("Oe download error for item:", i, e);
-              if (
-                (De((t) => {
-                  (t.setExtra("bulkItem", i), Te(e));
-                }),
-                a)
-              ) {
-                try {
-                  const t = new Blob([
-                      "Request did not succeed. If you are using Firefox go into you privacy settings ans select the\n                standard setting (https://support.mozilla.org/en-US/kb/content-blocking). If that is not the problem you tried to download to many images\n                and instagram has blocked you temporarily.\n\n",
-                      "If you are using chrome there is currently a bug in chrome which seems to block my requests. So stay strong and hope that this error gets fixed soon.",
-                      e.toString(),
-                    ]),
-                    n = yield a.getFileHandle(Me(i) + ".error.txt", {
-                      create: !0,
-                    }),
-                    r = yield n.createWritable();
-                  (yield r.write(t), yield r.close());
-                } catch (writeErr) {
-                  console.error("Failed to write error file:", writeErr);
+                if (postDownload && itemOutputFolder === "Posts and Metadata") {
+                  yield writePostSidecars(profileDirectory, item, fileName, n && n.username);
                 }
               }
+            } catch (e) {
+              console.error("Oe download error for item:", item, e);
+              De((t) => {
+                (t.setExtra("bulkItem", item), Te(e));
+              });
             }
             t.updateProgress({
-              completed: o + 1,
+              completed: index + 1,
               total: e.length,
-              isFirst: 0 === o,
-              isLast: o + 1 === e.length,
+              isFirst: 0 === index,
+              isLast: index + 1 === e.length,
               account: n,
               type: "download",
             });
@@ -13775,15 +13895,7 @@ var _global =
         });
       }
       function Me(e) {
-        let ext = "jpg";
-        if (e && e.url) {
-          const m = e.url.match(/\.([0-9a-z]+)(?:[\?#]|$)/i);
-          if (m && m[1]) {
-            ext = m[1].toLowerCase();
-          } else if (e.url.includes(".mp4")) {
-            ext = "mp4";
-          }
-        }
+        const ext = globalThis.__igdlMediaFormat.getUrlExtension(e && e.url) || "jpg";
         const user = ((e && e.username) || "instagram").replace(/[<>:"/\\|?*]/g, "");
         const taken = ((e && e.taken_at) || "").toString().replace(/[<>:"/\\|?*]/g, "");
         const id = ((e && (e.id || e.pk)) || Date.now()).toString().replace(/[<>:"/\\|?*]/g, "");
@@ -13950,12 +14062,15 @@ var _global =
           return e.display_url;
         }
         static getAllDownloadableMediaItems(e) {
+          const description = getPostDescription(e);
           if (e.edge_sidecar_to_children) {
             let t = [];
             for (let n of e.edge_sidecar_to_children.edges)
               t.push({
                 id: n.node.id,
                 pk: n.node.id,
+                shortcode: e.shortcode || e.code,
+                description,
                 taken_at: e.taken_at_timestamp,
                 username: e.owner.username,
                 url: n.node.is_video
@@ -13968,6 +14083,8 @@ var _global =
             {
               id: e.id,
               pk: e.id,
+              shortcode: e.shortcode || e.code,
+              description,
               taken_at: e.taken_at_timestamp,
               username: e.owner.username,
               url: e.is_video ? e.video_url : Ge.getBestDisplayUrl(e),
@@ -14098,10 +14215,15 @@ var _global =
               ((o = Ve.getAllDownloadableMediaItems(t)),
                 (i = Ve.getOwnerUsername(t)));
             }
-            return (
-              o.length >= 2 && n >= 0 && (o = [o[n]]),
-              { items: o, username: i }
-            );
+            if (o.length >= 2 && n >= 0) {
+              const selectedItem = o[n];
+              if (selectedItem) {
+                selectedItem.mediaOrdinal = n + 1;
+                selectedItem.mediaCount = o.length;
+              }
+              o = [selectedItem];
+            }
+            return { items: o, username: i };
           });
         }
         static getIdFromReactElement(e) {
@@ -14201,6 +14323,8 @@ var _global =
         static getAllDownloadableMediaItems(e) {
           if (!e) return [];
           const username = (e.user && e.user.username) || e.username || "instagram";
+          const shortcode = e.code || e.shortcode;
+          const description = getPostDescription(e);
           if (!e.carousel_media || !Array.isArray(e.carousel_media) || e.carousel_media.length === 0) {
             const url = this.getBestMediaUrl(e);
             return url
@@ -14208,6 +14332,8 @@ var _global =
                   {
                     id: e.id || e.pk,
                     pk: e.pk || e.id,
+                    shortcode: shortcode,
+                    description,
                     taken_at: e.taken_at,
                     username: username,
                     url: url,
@@ -14216,16 +14342,20 @@ var _global =
               : [];
           }
           let n = [];
-          for (let r of e.carousel_media) {
+          for (const [index, r] of e.carousel_media.entries()) {
             if (r) {
               const url = this.getBestMediaUrl(r);
               if (url) {
                 n.push({
                   id: r.id || r.pk || e.id,
                   pk: r.pk || r.id || e.pk,
+                  shortcode: shortcode,
+                  description,
                   taken_at: r.taken_at || e.taken_at,
                   username: username,
                   url: url,
+                  mediaOrdinal: index + 1,
+                  mediaCount: e.carousel_media.length,
                 });
               }
             }
@@ -14236,8 +14366,8 @@ var _global =
           var n;
           let r = null == e ? void 0 : e.getAttribute("__igdl_id");
           if (!r && t) {
-            let e = location.href.match(/\/(p|reel)\/(.+?)\//),
-              t = e && e.length >= 2 ? e[2] : void 0;
+            let e = location.href.match(/(?:^|\/)(?:p|reels?)\/([^/?#]+)/),
+              t = e && e.length >= 1 ? e[1] : void 0;
             t && (r = Xe.getIdFromShortcode(t));
           }
           if (!r) {
@@ -14248,7 +14378,7 @@ var _global =
               for (; n.parentElement && r < 20;) {
                 if (
                   ((n = n.parentElement),
-                  n.querySelector('[href^="/p/"], [href^="/reel/"]'))
+                  n.querySelector('[href^="/p/"], [href^="/reel/"], [href^="/reels/"]'))
                 ) {
                   t = n;
                   break;
@@ -14259,13 +14389,13 @@ var _global =
             if (t) {
               const e =
                 null ===
-                  (n = t.querySelector('[href^="/p/"], [href^="/reel/"]')) ||
+                  (n = t.querySelector('[href^="/p/"], [href^="/reel/"], [href^="/reels/"]')) ||
                 void 0 === n
                   ? void 0
                   : n.getAttribute("href");
               if (e) {
-                let t = e.match(/\/(p|reel)\/(.+?)\//),
-                  n = t && t.length >= 2 ? t[2] : void 0;
+                let t = e.match(/(?:^|\/)(?:p|reels?)\/([^/?#]+)/),
+                  n = t && t.length >= 1 ? t[1] : void 0;
                 n && (r = Xe.getIdFromShortcode(n));
               }
             }
@@ -14275,6 +14405,21 @@ var _global =
       };
       var Ze;
       Je = e([_], Je);
+      function hasMediaIdentifier(value) {
+        return value !== undefined && value !== null && value !== "";
+      }
+      function sameMediaItem(existing, candidate) {
+        if (!existing || !candidate) return false;
+        return (
+          existing.url === candidate.url ||
+          (hasMediaIdentifier(existing.pk) &&
+            hasMediaIdentifier(candidate.pk) &&
+            existing.pk === candidate.pk) ||
+          (hasMediaIdentifier(existing.id) &&
+            hasMediaIdentifier(candidate.id) &&
+            existing.id === candidate.id)
+        );
+      }
       let et = (Ze = class extends p {
         static downloadContent() {
           return t(this, void 0, void 0, function* () {
@@ -14514,7 +14659,7 @@ var _global =
               type: m.bulk,
               source: isReelsTab ? h.Reels : (isTaggedTab ? h.Tagged : h.Account),
             };
-            (yield o.runtime.sendMessage(d), yield Oe(i, n, void 0, a));
+            (yield o.runtime.sendMessage(d), yield Oe(i, n, void 0, a, isReelsTab ? "Reels" : "Posts and Metadata"));
           });
         }
         static getAccount(e, n, r) {
@@ -14616,9 +14761,9 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
-                          i.push(m);
-                        }
+                        if (!m || !m.url) return;
+                        const existing = i.find((item) => sameMediaItem(item, m));
+                        if (!existing) i.push(m);
                       });
                     }
                   } catch (err) {}
@@ -14658,7 +14803,7 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(e);
                     if (media && Array.isArray(media)) {
                       media.forEach((e) => {
-                        if (e && e.url && !i.some((existing) => existing.pk === e.pk || existing.id === e.id || existing.url === e.url)) {
+                        if (e && e.url && !i.some((existing) => sameMediaItem(existing, e))) {
                           i.push(e);
                         }
                       });
@@ -14709,7 +14854,11 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
+                        if (!m || !m.url) return;
+                        const existing = i.find((item) => sameMediaItem(item, m));
+                        if (existing) existing.outputFolder = "Reels";
+                        else {
+                          m.outputFolder = "Reels";
                           i.push(m);
                         }
                       });
@@ -14756,7 +14905,7 @@ var _global =
                     const media = Je.getAllDownloadableMediaItems(item);
                     if (media && Array.isArray(media)) {
                       media.forEach((m) => {
-                        if (m && m.url && !i.some((existing) => existing.pk === m.pk || existing.id === m.id || existing.url === m.url)) {
+                        if (m && m.url && !i.some((existing) => sameMediaItem(existing, m))) {
                           i.push(m);
                         }
                       });
@@ -14850,8 +14999,11 @@ var _global =
           );
         }
         static isReelFeed(e) {
-          return /https:\/\/www\.instagram\.com\/reels(?:\/[^/]+)?(?:\/)?(\?.*)*$/.test(
-            e,
+          return (
+            /https:\/\/www\.instagram\.com\/reels(?:\/[^/]+)?(?:\/)?(\?.*)*$/.test(
+              e,
+            ) ||
+            /https:\/\/www\.instagram\.com\/reel\/[^/]+(?:\/)?(\?.*)*$/.test(e)
           );
         }
         static isTV(e) {
@@ -14903,7 +15055,7 @@ var _global =
         }
         emitLocationEvent() {
           (tt.isHome(this.url) && this.emit("home"),
-            tt.isPost(this.url) && this.emit("post"),
+            tt.isPost(this.url) && !tt.isReelFeed(this.url) && this.emit("post"),
             tt.isExplore(this.url) && this.emit("explore"),
             tt.isStory(this.url) && this.emit("story"),
             tt.isChannel(this.url) && this.emit("channel"),
@@ -15001,6 +15153,8 @@ var _global =
                 }),
                 void s.createAndAdd("Could not find post.", "warn")
               );
+            const postDirectory = yield getPostDownloadDirectoryHandle();
+            if (!postDirectory) return;
             try {
               const e = yield Xe.getDownloadInfo(a);
               ((r = e.items), (i = e.username));
@@ -15025,7 +15179,7 @@ var _global =
               type: m.bulkPost,
               source: h.BulkPost,
             };
-            (r.length > 1 ? yield Oe(r, void 0, a) : yield Ie(r[0]),
+            (yield Oe(r, { username: i }, void 0, postDirectory),
               yield o.runtime.sendMessage(l));
           });
         }
@@ -15052,6 +15206,8 @@ var _global =
                 Te(new Error("Could not find post")),
                 void s.createAndAdd("Could not find post.", "warn")
               );
+            const postDirectory = yield getPostDownloadDirectoryHandle();
+            if (!postDirectory) return;
             try {
               const e = yield Xe.getDownloadInfo(c);
               ((l = e.items), (u = e.username));
@@ -15077,7 +15233,8 @@ var _global =
               type: m.single,
               source: h.Post,
             };
-            (yield Ie(l[0]), yield o.runtime.sendMessage(f));
+            (yield Oe(l, { username: d }, void 0, postDirectory),
+              yield o.runtime.sendMessage(f));
           });
         }
         static fetchMediaId(e) {
@@ -15236,6 +15393,8 @@ var _global =
                 Te(new Error("Could not find post")),
                 void s.createAndAdd("Could not find post.", "warn")
               );
+            const postDirectory = yield getPostDownloadDirectoryHandle();
+            if (!postDirectory) return;
             try {
               const e = yield Xe.getDownloadInfo(l);
               ((i = e.items), (a = e.username));
@@ -15261,7 +15420,7 @@ var _global =
               type: m.bulkPost,
               source: h.HoverPost,
             };
-            (i.length > 1 ? yield Oe(i, void 0, l) : yield Ie(i[0]),
+            (yield Oe(i, { username: u }, void 0, postDirectory),
               yield o.runtime.sendMessage(c));
           });
         }
@@ -15390,6 +15549,8 @@ var _global =
               l,
               u = e.getAttribute("__igdl_id");
             u || (u = Je.getIgId(e));
+            const postDirectory = yield getPostDownloadDirectoryHandle();
+            if (!postDirectory) return;
             try {
               const e = yield Xe.getDownloadInfo(u, n);
               ((a = e.items), (l = e.username));
@@ -15416,7 +15577,8 @@ var _global =
               type: m.single,
               source: h.PostSlider,
             };
-            (yield Ie(a[0]), yield o.runtime.sendMessage(d));
+            (yield Oe([a[0]], { username: c }, void 0, postDirectory),
+              yield o.runtime.sendMessage(d));
           });
         }
         static fetchMediaId(e) {
@@ -15496,7 +15658,11 @@ var _global =
               total: 0,
               type: "fetch",
             });
-            const i = null == t ? void 0 : t.getAttribute("__igdl_id");
+            const i =
+              (null == t ? void 0 : t.getAttribute("__igdl_id")) ||
+              Je.getIgId(t || e);
+            const postDirectory = yield getPostDownloadDirectoryHandle();
+            if (!postDirectory) return;
             let a, l;
             try {
               const e = yield Xe.getDownloadInfo(i);
@@ -15523,7 +15689,7 @@ var _global =
               type: m.single,
               source: h.ReelsFeed,
             };
-            (a.length > 1 ? yield Oe(a, void 0, i) : yield Ie(a[0]),
+            (yield Oe(a, { username: u }, void 0, postDirectory, "Reels"),
               yield o.runtime.sendMessage(c));
           });
         }
@@ -18824,7 +18990,9 @@ var _global =
               o.runtime.sendMessage(e);
             }),
             this.urlChangeEmitter.on("reels_feed", () => {
-              (this.removeEveryDownloader(), this.reelsFeedDownloader.init());
+              (this.removeEveryDownloader(),
+                this.reelsFeedDownloader.init(),
+                this.hotkeyDownloader.init());
               const e = {
                 imageURL: [],
                 accountName: "",

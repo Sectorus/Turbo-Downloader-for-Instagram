@@ -18,6 +18,13 @@ A fixed fork of the Chrome/Brave extension **Turbo Downloader for Instagram** (f
 - **UI update**:
   - Styled the "Download All" button as a primary Instagram-style blue button with white text.
 
+## Post downloads
+
+- Post and reel downloads use the selected download folder. Files are grouped under `Instagram - <username>`.
+- Carousel media uses numbered filenames. Each item gets a JSON metadata sidecar; captions also get a `.txt` sidecar.
+- WebP images are converted to JPEG when the browser canvas API supports it. The filename follows the downloaded image format.
+- The extension checks image signatures when the URL says HEIC, HEIF, or WebP, so mislabeled image responses keep the correct file extension.
+
 ## How to install
 
 1. Open `chrome://extensions` or `brave://extensions`.
