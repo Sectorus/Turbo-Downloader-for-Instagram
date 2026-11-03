@@ -13723,12 +13723,7 @@ var _global =
         }
       }
       function getPostDescription(post) {
-        const caption = post && (post.caption || post.caption_text);
-        if (typeof caption === "string") return caption;
-        if (caption && typeof caption.text === "string") return caption.text;
-        const edges = post && post.edge_media_to_caption && post.edge_media_to_caption.edges;
-        const text = edges && edges[0] && edges[0].node && edges[0].node.text;
-        return typeof text === "string" ? text : "";
+        return globalThis.__igdlInstagramData.getCaption(post);
       }
       function buildPostDownloadFilename(item, occurrence, mediaCount, profileUsername) {
         const url = item && item.url;
@@ -14387,6 +14382,12 @@ var _global =
               }
             }
             if (t) {
+              const shortcode = globalThis.__igdlInstagramData.getPostShortcodeFromLinks(
+                [...t.querySelectorAll("a[href]")].map((link) => link.href || link.getAttribute("href")),
+              );
+              if (shortcode) r = Xe.getIdFromShortcode(shortcode);
+            }
+            if (!r && t) {
               const e =
                 null ===
                   (n = t.querySelector('[href^="/p/"], [href^="/reel/"], [href^="/reels/"]')) ||

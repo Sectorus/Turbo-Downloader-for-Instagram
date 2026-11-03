@@ -5,11 +5,11 @@
   "content_scripts": [
     {
       "css": ["css/extension.css"],
-      "js": ["js/media-format.js", "js/extension.js"],
+      "js": ["js/instagram-data.js", "js/media-format.js", "js/extension.js"],
       "matches": ["*://*.instagram.com/*"]
     },
     {
-      "js": ["js/inject.js"],
+      "js": ["js/instagram-data.js", "js/inject.js"],
       "matches": ["*://*.instagram.com/*"],
       "run_at": "document_start",
       "world": "MAIN"
