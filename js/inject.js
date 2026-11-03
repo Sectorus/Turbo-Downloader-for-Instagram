@@ -117,7 +117,6 @@ var _global =
 
             if (typeof window.XMLHttpRequest === "function") {
               const origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-              const origSend = XMLHttpRequest.prototype.send;
 
               XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
                 try {
@@ -128,20 +127,6 @@ var _global =
                   }
                 } catch (err) {}
                 return origSetRequestHeader.apply(this, arguments);
-              };
-
-              XMLHttpRequest.prototype.send = function () {
-                try {
-                  this.addEventListener("readystatechange", () => {
-                    try {
-                      if (this.readyState === 2 || this.readyState === 4) {
-                        const setClaim = this.getResponseHeader("x-ig-set-www-claim") || this.getResponseHeader("x-ig-www-claim");
-                        if (setClaim) saveClaim(setClaim);
-                      }
-                    } catch (err) {}
-                  });
-                } catch (err) {}
-                return origSend.apply(this, arguments);
               };
             }
           })();
@@ -190,6 +175,9 @@ var _global =
                   if (!node) return null;
                   const user = node.user?.__ref ? source.get(node.user.__ref) : null;
                   const ownerUsername = user?.username || fallbackUsername;
+                  const caption = node.caption?.__ref
+                    ? source.get(node.caption.__ref)
+                    : node.caption;
                   let candidates = null;
                   if (node.image_versions2?.__ref) {
                     const imgV = source.get(node.image_versions2.__ref);
@@ -283,6 +271,9 @@ var _global =
                     id: node.id || node.pk,
                     pk: node.pk || node.id,
                     code: node.code,
+                    caption,
+                    caption_text: node.caption_text,
+                    edge_media_to_caption: node.edge_media_to_caption,
                     taken_at: node.taken_at,
                     user: { username: ownerUsername },
                     image_versions2: candidates ? { candidates } : null,
